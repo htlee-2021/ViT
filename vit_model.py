@@ -172,7 +172,7 @@ def train_vit(train_loader, val_loader, num_classes, num_epochs=100):
     print(f"Using device: {device}")
     
     # Initialize model
-    model = ViT(
+    model = VideoViT(
         image_size=224,
         patch_size=16,
         in_channels=3,
