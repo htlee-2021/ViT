@@ -4,8 +4,8 @@ from data_loader import create_frame_dataloaders
 
 # Create dataloaders
 train_loader, val_loader = create_frame_dataloaders(
-    frames_root_dir='path/to/dfdc_train_part_0_1_frame',
-    metadata_path='path/to/metadata.json',
+    frames_root_dir=r'C:\Users\Lenovo\Downloads\dfdc_train_part_0_balanced_1_frame',
+    metadata_path=r'C:\Users\Lenovo\Downloads\dfdc_train_part_0_balanced_1_frame\metadata.json',
     batch_size=8,
     num_frames=10,
     image_size=224

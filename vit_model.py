@@ -22,22 +22,27 @@ class PatchEmbedding(nn.Module):
         x = rearrange(x, 'b e h w -> b (h w) e')  # (B, N, E)
         return x
 
-class ViT(nn.Module):
-    def __init__(self, image_size=224, patch_size=16, in_channels=3, 
-                 num_classes=1000, embed_dim=768, depth=12, num_heads=12, 
+# Replace your current ViT class with this modified version
+class VideoViT(nn.Module):
+    def init(self, num_frames=10, image_size=224, patch_size=16, in_channels=3, 
+                 num_classes=2, embed_dim=768, depth=12, num_heads=12, 
                  mlp_ratio=4., dropout=0.1):
-        super().__init__()
+        super().init()
         
-        # Patch Embedding
+        # Add temporal embedding
+        self.num_frames = num_frames
+        self.temporal_embed = nn.Parameter(torch.zeros(1, num_frames, embed_dim))
+        
+        # Patch Embedding (keep your existing code)
         self.patch_embed = PatchEmbedding(image_size, patch_size, 
                                         in_channels, embed_dim)
         num_patches = self.patch_embed.num_patches
         
-        # Class token and position embedding
+        # Class token and position embedding (keep your existing code)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
         
-        # Transformer Encoder
+        # Transformer Encoder (keep your existing code)
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=embed_dim,
             nhead=num_heads,
@@ -48,17 +53,18 @@ class ViT(nn.Module):
         )
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=depth)
         
-        # MLP Head
+        # MLP Head (keep your existing code)
         self.mlp_head = nn.Sequential(
             nn.LayerNorm(embed_dim),
             nn.Linear(embed_dim, num_classes)
         )
         
-        # Initialize weights
+        # Initialize weights (keep your existing code)
+        nn.init.trunc_normal_(self.temporal_embed, std=0.02)  # Add this line
         nn.init.trunc_normal_(self.pos_embed, std=0.02)
         nn.init.trunc_normal_(self.cls_token, std=0.02)
         self.apply(self._init_weights)
-        
+    
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
             nn.init.trunc_normal_(m.weight, std=0.02)
@@ -69,8 +75,23 @@ class ViT(nn.Module):
             nn.init.constant_(m.weight, 1.0)
     
     def forward(self, x):
+        B = x.shape[0]  # Batch size
+        
+        # Modify input handling for video
+        # x shape: (batch_size, num_frames, channels, height, width)
+        x = rearrange(x, 'b t c h w -> (b t) c h w')
+        
         # Patch embedding
         x = self.patch_embed(x)
+        
+        # Reshape to include temporal dimension
+        x = rearrange(x, '(b t) n e -> b t n e', b=B)
+        
+        # Add temporal embedding
+        x = x + self.temporal_embed.unsqueeze(2)
+        
+        # Flatten temporal and spatial dimensions
+        x = rearrange(x, 'b t n e -> b (t n) e')
         
         # Add cls token and position embedding
         cls_token = self.cls_token.expand(x.shape[0], -1, -1)
