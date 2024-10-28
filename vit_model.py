@@ -24,10 +24,10 @@ class PatchEmbedding(nn.Module):
 
 # Replace your current ViT class with this modified version
 class VideoViT(nn.Module):
-    def init(self, num_frames=10, image_size=224, patch_size=16, in_channels=3, 
+    def __init__(self, num_frames=10, image_size=224, patch_size=16, in_channels=3, 
                  num_classes=2, embed_dim=768, depth=12, num_heads=12, 
                  mlp_ratio=4., dropout=0.1):
-        super().init()
+        super().__init__()
         
         # Add temporal embedding
         self.num_frames = num_frames
@@ -153,7 +153,7 @@ def train_vit(train_loader, val_loader, num_classes, num_epochs=100):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     # Initialize model
-    model = ViT(
+    model = VideoViT(
         image_size=224,
         patch_size=16,
         in_channels=3,
