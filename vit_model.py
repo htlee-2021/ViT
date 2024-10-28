@@ -22,27 +22,39 @@ class PatchEmbedding(nn.Module):
         x = rearrange(x, 'b e h w -> b (h w) e')  # (B, N, E)
         return x
 
-# Replace your current ViT class with this modified version
 class VideoViT(nn.Module):
-    def init(self, num_frames=10, image_size=224, patch_size=16, in_channels=3, 
+    def __init__(self, num_frames=10, image_size=224, patch_size=16, in_channels=3, 
                  num_classes=2, embed_dim=768, depth=12, num_heads=12, 
                  mlp_ratio=4., dropout=0.1):
-        super().init()
+        super().__init__()
         
-        # Add temporal embedding
         self.num_frames = num_frames
-        self.temporal_embed = nn.Parameter(torch.zeros(1, num_frames, embed_dim))
+        self.image_size = image_size
+        self.patch_size = patch_size
+        self.embed_dim = embed_dim
         
-        # Patch Embedding (keep your existing code)
+        # Calculate number of patches
+        self.num_patches_per_frame = (image_size // patch_size) ** 2
+        self.total_patches = self.num_patches_per_frame * num_frames
+        
+        # Patch Embedding
         self.patch_embed = PatchEmbedding(image_size, patch_size, 
                                         in_channels, embed_dim)
-        num_patches = self.patch_embed.num_patches
         
-        # Class token and position embedding (keep your existing code)
+        # Class token
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
         
-        # Transformer Encoder (keep your existing code)
+        # Position embeddings - now accounting for temporal dimension
+        self.pos_embed = nn.Parameter(
+            torch.zeros(1, self.total_patches + 1, embed_dim)
+        )
+        
+        # Temporal embedding
+        self.temporal_embed = nn.Parameter(
+            torch.zeros(1, num_frames, embed_dim)
+        )
+        
+        # Transformer Encoder
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=embed_dim,
             nhead=num_heads,
@@ -53,14 +65,14 @@ class VideoViT(nn.Module):
         )
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=depth)
         
-        # MLP Head (keep your existing code)
+        # MLP Head
         self.mlp_head = nn.Sequential(
             nn.LayerNorm(embed_dim),
             nn.Linear(embed_dim, num_classes)
         )
         
-        # Initialize weights (keep your existing code)
-        nn.init.trunc_normal_(self.temporal_embed, std=0.02)  # Add this line
+        # Initialize weights
+        nn.init.trunc_normal_(self.temporal_embed, std=0.02)
         nn.init.trunc_normal_(self.pos_embed, std=0.02)
         nn.init.trunc_normal_(self.cls_token, std=0.02)
         self.apply(self._init_weights)
@@ -75,35 +87,41 @@ class VideoViT(nn.Module):
             nn.init.constant_(m.weight, 1.0)
     
     def forward(self, x):
-        B = x.shape[0]  # Batch size
-        
-        # Modify input handling for video
         # x shape: (batch_size, num_frames, channels, height, width)
+        B = x.shape[0]
+        
+        # Reshape for patch embedding
+        # Combine batch and time dimensions
         x = rearrange(x, 'b t c h w -> (b t) c h w')
         
         # Patch embedding
-        x = self.patch_embed(x)
+        x = self.patch_embed(x)  # Shape: (B*T, num_patches_per_frame, embed_dim)
         
-        # Reshape to include temporal dimension
-        x = rearrange(x, '(b t) n e -> b t n e', b=B)
+        # Reshape to separate batch and temporal dimensions
+        x = rearrange(x, '(b t) n e -> b (t n) e', b=B, t=self.num_frames)
         
-        # Add temporal embedding
-        x = x + self.temporal_embed.unsqueeze(2)
-        
-        # Flatten temporal and spatial dimensions
-        x = rearrange(x, 'b t n e -> b (t n) e')
-        
-        # Add cls token and position embedding
-        cls_token = self.cls_token.expand(x.shape[0], -1, -1)
+        # Add positional embedding
+        cls_token = self.cls_token.expand(B, -1, -1)
         x = torch.cat((cls_token, x), dim=1)
         x = x + self.pos_embed
+        
+        # Add temporal information
+        # Reshape to expose temporal dimension
+        x_nocls = x[:, 1:, :]
+        x_nocls = rearrange(x_nocls, 'b (t n) e -> b t n e', t=self.num_frames)
+        x_nocls = x_nocls + self.temporal_embed.unsqueeze(2)
+        x_nocls = rearrange(x_nocls, 'b t n e -> b (t n) e')
+        
+        # Recombine with CLS token
+        x = torch.cat((x[:, :1, :], x_nocls), dim=1)
         
         # Transformer encoder
         x = self.transformer(x)
         
-        # MLP head
-        x = x[:, 0]  # Take cls token
+        # MLP head (use [CLS] token)
+        x = x[:, 0]
         x = self.mlp_head(x)
+        
         return x
 
 def train_epoch(model, train_loader, criterion, optimizer, device):
@@ -151,9 +169,11 @@ def validate(model, val_loader, criterion, device):
 
 def train_vit(train_loader, val_loader, num_classes, num_epochs=100):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
     
     # Initialize model
-    model = ViT(
+    model = VideoViT(
+        num_frames=10,
         image_size=224,
         patch_size=16,
         in_channels=3,
@@ -173,12 +193,13 @@ def train_vit(train_loader, val_loader, num_classes, num_epochs=100):
     # Training loop
     best_val_acc = 0
     for epoch in range(num_epochs):
+        print(f'\nEpoch [{epoch+1}/{num_epochs}]')
+        
         train_loss, train_acc = train_epoch(model, train_loader, criterion, 
                                           optimizer, device)
         val_loss, val_acc = validate(model, val_loader, criterion, device)
         scheduler.step()
         
-        print(f'Epoch [{epoch+1}/{num_epochs}]')
         print(f'Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%')
         print(f'Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%')
         
